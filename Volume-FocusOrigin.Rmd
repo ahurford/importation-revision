@@ -3,7 +3,8 @@
 ## Project: Importation Risk
 ## Zahra Mohammadi
 title: "R Notebook"
-output: html_document 
+output: html_document
+## Edits by A. Hurford June 10, 2025.
 ---
 ## load libraries
 ```{r}
@@ -45,7 +46,7 @@ FCEXCrew <- FCEXCrew[FCEXCrew$date < as.Date("2021-06-01"),]
 IATA <- read.csv("Data/TraVolData/InboundIATA.csv")
 IATA$date <- as.Date(as.character(IATA$date), format = "%Y-%m-%d")
 
-## 3. TDF ( aggregated )
+## 3. TDF 
 TDF <- read.csv("Data/TraVolData/ExtractTDF.csv")
 TDF$date <- as.Date(as.character(TDF$date), format = "%Y-%m-%d") 
 
@@ -53,77 +54,18 @@ TDF$date <- as.Date(as.character(TDF$date), format = "%Y-%m-%d")
 Travel.case <- read.csv("Data/Travel.Case.csv")
 Travel.case$date <- as.Date(as.character(Travel.case$date), format = "%Y-%m-%d")
 ```
-##plot TDF data
+## plot TDF data & NL reported travel-related cases
 ```{r}
-# get monthly per province from categorical regression (plot)
-r.TDF <- TDF
-##add month and year column
-r.TDF$year  <- strftime(r.TDF$date, "%Y")   # Create year column
-r.TDF$month <- strftime(r.TDF$date, "%m")   # Create month column
-
-
-lm.TDF <- function(){
-  model_ON <- lm(ON ~ month + year , data = r.TDF)      
-  model_PEI <- lm(PEI ~ month + year , data = r.TDF)  
-  model_QC <- lm(QC ~ month + year , data = r.TDF)      
-  model_SK <- lm(SK ~ month + year , data = r.TDF)  
-  model_AB <- lm(AB ~ month + year , data = r.TDF)      
-  model_BC <- lm(BC ~ month + year , data = r.TDF)  
-  model_MB <- lm(MB ~ month + year , data = r.TDF)      
-  model_NB <- lm(NB ~ month + year , data = r.TDF)  
-  model_NS <- lm(NS ~ month + year , data = r.TDF)      
-  model_TR <- lm(TR ~ month + year , data = r.TDF) 
-  model_US <- lm(US ~ month + year , data = r.TDF)      
-  model_nonUS <- lm(nonUS ~ month + year , data = r.TDF) 
-  model_ALLCANotNL <- lm(ALLCANotNL ~ month + year , data = r.TDF)  
-  model_AllFR <- lm(AllFR ~ month + year , data = r.TDF)  
-
-  r.TDF$ON <- model_ON[["fitted.values"]]
-  r.TDF$PEI <- model_PEI[["fitted.values"]]
-  r.TDF$QC <- model_QC[["fitted.values"]]
-  r.TDF$SK <- model_SK[["fitted.values"]]
-  r.TDF$AB <- model_AB[["fitted.values"]]
-  r.TDF$BC <- model_BC[["fitted.values"]]
-  r.TDF$MB <- model_MB[["fitted.values"]]
-  r.TDF$NB <- model_NB[["fitted.values"]]
-  r.TDF$NS <- model_NS[["fitted.values"]]
-  r.TDF$TR <- model_TR[["fitted.values"]]
-  r.TDF$nonUS <- model_nonUS[["fitted.values"]]
-  r.TDF$ALLCANotNL  <- model_ALLCANotNL[["fitted.values"]]
-  r.TDF$AllFR <- model_AllFR[["fitted.values"]]
-
-  return(r.TDF)
-}
-#regression and cleanup
-r.TDF = lm.TDF()
+#r.TDF$year  <- strftime(r.TDF$date, "%Y")   # Create year column
+#r.TDF$month <- strftime(r.TDF$date, "%m")   # Create month column
  
-# aggregating the daily data
-mon.TDF <- r.TDF %>%                        
-  group_by( year, month) %>% 
-  dplyr::summarize(ON = sum(ON) , PEI = sum(PEI) , QC = sum(QC),
-                   SK = sum(SK), AB = sum(AB), BC = sum(BC),
-                   MB = sum(MB), NB = sum(NB), NS = sum(NS),
-                   TR= sum(TR) ,
-                   US = sum(US), nonUS = sum(nonUS),
-                   ALLCANotNL = sum(ALLCANotNL), AllFR=sum(AllFR)) %>%
-  as.data.frame()
-
-
-#make one column for date
-mon.TDF <- mon.TDF %>%
-  mutate(date = with(., sprintf("%s-%02s", year, month)))
-mon.TDF$date <- as.Date(paste(mon.TDF$date,"-01",sep=""))  # convert to date
-mon.TDF <- mon.TDF  %>% relocate(date, .before = year) # organising
-mon.TDF <- select(mon.TDF , -c(year, month))
-
 # plot
 colLeg <- c("INT" = cpalete[1], "CA" = cpalete[2])
 p1 <- ggplot() + 
-  geom_point(data=TDF, aes(x=date, y= ALLCANotNL, color='CA')) +
-  geom_line( data=r.TDF, aes(x=date, y= ALLCANotNL, col='CA'), size=1) +
-  geom_point(data=TDF, aes(x=date, y= AllFR, color= 'INT')) +
-  geom_line( data=r.TDF, aes(x=date, y=AllFR, col='INT'), size=1) +
-  
+  geom_point(data=TDF, aes(x=date, y= ALLCANotNL, color='CA'), size=1, alpha = 0.5) +
+  geom_line(data=TDF, aes(x=date,y=rollmean(ALLCANotNL, 7, na.pad=TRUE), color='CA'),lwd=1)+
+  geom_point(data=TDF, aes(x=date, y= AllFR, color= 'INT'), size=1, alpha = 0.5) +
+  geom_line(data=TDF, aes(x=date,y=rollmean(AllFR, 7, na.pad=TRUE), color='INT'), lwd=1)+
   labs(x="", y="\n Arriving travelers (daily)", title="Travel volume (TDF)") +
   scale_x_date(date_breaks = "1 month", date_labels = "%b %y") +
   scale_color_manual(values = colLeg) +
@@ -136,52 +78,13 @@ p1 <- ggplot() +
                           axis.title = element_text(size=rel(1.1)),
                           axis.text.y = element_text(size=rel(1.2)))
 
-
-p1
-```
-
-##plot Travel-related cases
-```{r}
-ave.fun <- function(){
-  #add month-date
-  Travel.case$year  <- strftime(Travel.case$date, "%Y")   
-  Travel.case$month <- strftime(Travel.case$date, "%m") 
-  Ave.df1 <- aggregate(Tot.Int ~ month + year , Travel.case , mean )
-  Ave.df2 <- aggregate(Tot.Dom ~ month + year , Travel.case , mean )
-  Ave.df <- Ave.df1 %>% left_join(Ave.df2 , by= "month")
-  Ave.df  <- Ave.df  %>% mutate(date = with(., sprintf("%s-%02s", year.x, month)))
-  Ave.df$date <- as.Date(paste(Ave.df$date,"-01",sep=""))  # convert to date
-  Ave.df <- select(Ave.df  , c(date, Tot.Int, Tot.Dom))
-  return( Ave.df )
-}
-
-mon.Travel.case <- ave.fun()
-
-## repeat average for days in a month for plotting purpose 
-rep.fun <- function(mon.Travel.case){
-  df <- mon.Travel.case
-  df["Ym"] <- format(as.Date(df$date), "%Y-%m")
-  Av_daily <- df %>% select(date) %>% 
-    complete(date=  seq.Date(min(date), max(date)+30, by="day"),) %>%
-    mutate(Ym=paste(year(date),str_pad(month(date), 2, pad = "0"),sep = "-"))
-  Av_daily <- Av_daily %>% left_join(df, by="Ym")
-  Av_daily <- select(Av_daily, c("date.x", "Tot.Int" ,"Tot.Dom" ))
-  Av_daily <- Av_daily %>% rename(date = date.x)
-  return(Av_daily)
-}
-
-df.plt <- rep.fun(mon.Travel.case)
-df.plt <- select(Travel.case, c("date", "Tot.Int", "Tot.Dom" )) %>% left_join(df.plt , by="date")
-df.plt[df.plt == 0] <- NA
-
-colLeg <- c("INT" = cpalete[1], "CA" = cpalete[2])
 p2 <- ggplot() + 
-  geom_point(data=df.plt, aes(x=date, y= Tot.Dom.x, color='CA')) +
-  geom_line( data=df.plt, aes(x=date, y= Tot.Dom.y, col='CA'), size=1) +
-  geom_point(data=df.plt, aes(x=date, y= Tot.Int.x, color= 'INT')) +
-  geom_line( data=df.plt, aes(x=date, y=Tot.Int.y, col='INT'), size=1) +
+  geom_point(data=Travel.case, aes(x=date, y= Tot.Dom, color='CA'), size=1, alpha=0.5) +
+  geom_line(data=Travel.case, aes(x=date,y=rollmean(Tot.Dom, 7, na.pad=TRUE), color='CA'),lwd=1)+
+  geom_point(data=Travel.case, aes(x=date, y= Tot.Int, color= 'INT'), size=1, alpha=0.5)+
+  geom_line(data=Travel.case, aes(x=date,y=rollmean(Tot.Int, 7, na.pad=TRUE), color='INT'),lwd=1)+
   
-  labs(x="", y="\n Infected travelers (daily)", title="Travel-related cases (NLHS)") +
+  labs(x="", y="\n Travel-related cases (daily)", title="Travel-related cases (NLHS)") +
   scale_x_date(date_breaks = "1 month", date_labels = "%b %y") +
   scale_color_manual(values = colLeg) +
   guides(color = guide_legend(title = "Departure Origin"), size= rel(1.3))+
@@ -193,51 +96,8 @@ p2 <- ggplot() +
                           axis.text.y = element_text(size=rel(1.2)))
 
 p2
-```
-##Visualize pre pandemic data sources gap
-```{r}
-## show differences in international travelers from IATA nd FC
-df.plt <- select(IATA, c("date", "ALLCANotNL", "AllFR"))
-df.plt <- df.plt %>% left_join(FC, by='date') 
-
-colLeg <- c("IATA" = cpalete[6], "FC" = cpalete[9])
-p3 <- ggplot() + 
-  geom_point( data= df.plt, aes(x=date, y=AllFR ,  color='IATA')) +
-  geom_point( data= df.plt, aes(x=date, y=total , color='FC')) +
-  scale_x_date(date_breaks = "1 month", date_labels = "%b %y") +
-  labs(x="", y="\n Arrival travelers", title="Pre-pandemic, International origin") +
-  scale_color_manual(values = colLeg) +
-  guides(color = guide_legend(title = "Data Source"), size=rel(1.4)) +
-  theme_classic() + theme(axis.text.x = element_text(angle = 90, size=rel(1.3)), 
-                          legend.position="bottom",
-                          legend.text=element_text(size=rel(1.2)),
-                          plot.title=element_text(size=rel(1.4), face="bold"),
-                          axis.title = element_text(size=rel(1.3)),
-                          axis.text.y = element_text(size=rel(1.3)))
-p3
-```
-##visualize during pandemic data sources gap
-```{r}
-## show differences in international travelers from TDF nd FC
-df.plt <- select(mon.TDF, c("date", "ALLCANotNL", "AllFR")) %>% left_join(FC, by ="date")
-
-colLeg <- c("TDF-INT" = cpalete[6], "FC" =cpalete[9]) 
-p4 <- ggplot() + 
-  geom_point( data= df.plt, aes(x=date, y=AllFR ,  color='TDF-INT')) +
-  geom_point( data= df.plt, aes(x=date, y=total , color='FC')) +
-  scale_x_date(date_breaks = "1 month", date_labels = "%b %y") +
-  labs(x="", y="\n Arrival travelers", title="During pandemic, International origin") +
-  scale_color_manual(values = colLeg) +
-  guides(color = guide_legend(title = "Data Source"), size= rel(1.4))+
-  theme_classic() + theme(axis.text.x = element_text(angle = 90, size=rel(1.3)), 
-                          legend.position="bottom",
-                          legend.text=element_text(size=rel(1.2)),
-                          plot.title=element_text(size=rel(1.4), face="bold"),
-                          axis.title = element_text(size=rel(1.3)),
-                          axis.text.y = element_text(size=rel(1.3)))
-
-
-p4
+(p1 + p2 ) + plot_annotation(tag_levels = 'A')  
+ggsave("Figure/FigureApp2.png", width = 10, , height = 6, dpi =500)
 ```
 
 ## get the total travel volume - pre pandemic
@@ -268,7 +128,6 @@ total.pre <- function(IATA, FC, FCEXCrew) {
 }
 
 TRV.Pre <- total.pre(IATA, FC, FCEXCrew)
-
 ```
 ## get the total travel volume - during the pandemic
 ```{r}
@@ -369,10 +228,10 @@ cuts <- data.frame(Ref = c("1", "2", "3", "4", "5", "6","7","8","9"),
                    vals = c(as.Date("2020-03-13"), as.Date("2020-05-04"),as.Date("2020-06-09"),
                             as.Date("2020-07-03"), as.Date("2020-08-31"), as.Date("2020-10-20"), 
                             as.Date("2020-11-25"),as.Date("2021-02-01"),
-                            as.Date("2021-03-27")), stringsAsFactors = FALSE)
+                            as.Date("2021-03-01")), stringsAsFactors = FALSE)
 
-cut3 <- data.frame(Ref = c("81.6% decrease"),
-                   vals = c(as.Date("2021-01-28")),
+cut3 <- data.frame(Ref = c("82% decrease"),
+                   vals = c(as.Date("2020-11-01")),
                    stringsAsFactors = FALSE)
 
 
@@ -380,21 +239,21 @@ colLeg <- c("IATA" = cpalete[4], "TDF" = cpalete[5],
             "FC" = cpalete[3], "Estimated"= cpalete[6])
 
 p6 <- ggplot() +
-  geom_line(data=df.plt, aes(x=date, y= estimated, col="Estimated"), lty=1, size=1)+
-  geom_line(data=df.plt, aes(x=date, y= IATA, col="IATA"), lty=1, size=0.7)+
-  geom_line(data=df.plt, aes(x=date, y= TDF, col="TDF"), lty=1, size=0.7)+
-  geom_line(data=df.plt, aes(x=date, y= FC, col="FC"), linetype="dashed", lty=2, size=0.7)+
-  annotate("rect", xmin = as.Date("2020-03-01"), xmax =as.Date("2020-09-01"), ymin = 0,
-           ymax = 210000, alpha = .1)+
   geom_vline(mapping = aes(xintercept = vals), linetype="dashed", data = cuts, 
              show.legend = FALSE, size=0.3) +
   geom_text(mapping = aes(x = vals, y = 200000, label = Ref, hjust = 1.2, vjust = -.5), 
             data = cuts, size=3, fontface="bold") +
-  geom_text(mapping = aes(x = vals, y = 30000, label = Ref, hjust = .13, vjust =  0.1, angle = 0),
-           data = cut3, size=rel(3.2), color= cpalete[6], fontface="bold")  +
+  geom_text(mapping = aes(x = vals, y = 30000, label = Ref, hjust = .13, vjust =  0.1, angle = 0), data = cut3, size=rel(4), color= "black")  +
+  geom_line(data=df.plt, aes(x=date, y= estimated, col="Total"), lty=1, size=1)+
+  geom_line(data=df.plt, aes(x=date, y= IATA, col="IATA"), lty=1, size=1)+
+  geom_line(data=df.plt, aes(x=date, y= TDF, col="TDF"), lty=1, size=1)+
+  geom_line(data=df.plt, aes(x=date, y= FC, col="FC"), lty=1, size=1)+
+  #annotate("rect", xmin = as.Date("2020-03-01"), xmax =as.Date("2020-09-01"), ymin = 0,
+           #ymax = 210000, alpha = .1)+
   scale_x_date(date_breaks = "1 month", date_labels = "%b %y") +
   theme_light() + labs(color=" ", title="Travel volume", y="\n Arriving travelers (monthly)", x="") +
-  scale_color_manual(values = colLeg) +
+  #scale_color_manual(values = colLeg) +
+  scale_color_manual(values = c("#9FDA3AFF","#1FA187FF","#365C8DFF", "black")) +
   theme_classic() + theme(axis.text.x = element_text(angle = 90, size=rel(1.2)), 
                           legend.title = element_blank(),
                           legend.position="bottom",
@@ -404,7 +263,6 @@ p6 <- ggplot() +
                           axis.text.y = element_text(size=rel(1.2)))
 
 p6
-
 ```
 
 ## calculate reduction
@@ -450,7 +308,6 @@ for (i in 1:nrow(CRPer)){
      CRPer[i,j] <- (CRPer[i,j]*100)/(CRPer$estimated[i])
   }
 }
-
 ```
 # plot percent after correction (provinces)
 ```{r}
@@ -494,20 +351,19 @@ p7 <- ggplot() +
   geom_text(mapping = aes(x = vals, y = 100, label = Ref, hjust = 1.04, vjust = - 0.5, angle = 90),
            data = cut2, size=rel(3.1))  +
   theme_classic() + theme(axis.text.x = element_text(angle = 90, size=rel(1.2)), 
-                          legend.position="bottom" ,
-                          legend.text=element_text(size=rel(1.2)),
+                          legend.position="right" ,
+                          legend.text=element_text(size=rel(1)),
                           plot.title=element_text(size=rel(1.3), face="bold"),
                           axis.title = element_text(size=rel(1.1)),
                           axis.text.y = element_text(size=rel(1.2))) + 
   scale_y_continuous(labels = function(x) paste0(x*1, "%"))
 
 p7
-
 ```
 
 ## Canada Map (pre and during the pandemic), show average percentage over 9 month
 ```{r}
-Av.per <- function(CRPer){
+Av.per1 <- function(CRPer){
   AA <- CRPer
   # get the average months March 2019 to Feb 2020 (except June July August 2019) 
   AA <- subset(AA, !date %in% c(as.Date("2019-01-01"), as.Date("2019-02-01"), 
@@ -516,10 +372,8 @@ Av.per <- function(CRPer){
                                 as.Date("2019-08-01")) )
   rownames(AA) <- NULL   # Reset row names             
   AA1 <- AA[1:9,]        #pre-pandemic
-  AA2 <- AA[10:18,]      #pandemic
   # get the mean for both dataframe
   A1 <- colMeans(AA1[2:13])
-  A2 <- colMeans(AA2[2:13])
   
   A1 <- data.frame(A1)
   A1 <- cbind(province = rownames(A1), A1)
@@ -531,7 +385,18 @@ Av.per <- function(CRPer){
   A1$A1 <- as.numeric(A1$A1)
   A1 <- A1 %>% rename(Percentage = A1)
   A1$province[A1$province == 'PEI'] <- 'PE'
-
+  return(A1)
+}
+Av.per2 <- function(CRPer){
+  AA <- CRPer
+  # get the average months March 2019 to Feb 2020 (except June July August 2019) 
+  AA <- subset(AA, !date %in% c(as.Date("2019-01-01"), as.Date("2019-02-01"), 
+                                as.Date("2020-03-01"), as.Date("2019-06-01"), 
+                                as.Date("2019-07-01"), as.Date("2019-07-01"), 
+                                as.Date("2019-08-01")) )
+  rownames(AA) <- NULL   # Reset row names             
+  AA2 <- AA[10:18,]      #pandemic
+  A2 <- colMeans(AA2[2:13])
   A2 <- data.frame(A2)
   A2 <- cbind(province = rownames(A2), A2)
   rownames(A2) <- 1:nrow(A2)
@@ -542,14 +407,11 @@ Av.per <- function(CRPer){
   A2$A2 <- as.numeric(A2$A2)
   A2 <- A2 %>% rename(Percentage = A2)
   A2$province[A2$province == 'PEI'] <- 'PE'
-
-  #return(A1)
   return(A2)
 }
 
-A1 <- Av.per(CRPer)
-A2 <- Av.per(CRPer)
-
+A1 <- Av.per1(CRPer)
+A2 <- Av.per2(CRPer)
 
 ## canada map
 pr_geographic <- mapcan(boundaries = province, type = standard)
@@ -558,17 +420,17 @@ pr_geographic <- inner_join(pr_geographic, A1, by = c("pr_alpha" = "province"))
 m1 <- pr_geographic %>%
   ggplot(aes(x = long, y = lat, group = group, fill = Percentage)) +
   geom_polygon(alpha= 1, show.legend = NA) +
-  annotate(geom = "text", x = 642412.6, y = 201110.2, label = "27%", color = "white", size = 3)+
-  annotate(geom = "text", x = 1349519.2, y = 782762.2,label = "14%", color = "white", size = 3)+
+  annotate(geom = "text", x = 642412.6, y = 201110.2, label = "27%", color = "black", size = 3)+
+  annotate(geom = "text", x = 1349519.2, y = 782762.2,label = "15%", color = "white", size = 3)+
   annotate(geom = "text", x = -115306.8, y = 644233.4,label = "0.7%",color = "white", size = 3)+
-  annotate(geom = "text", x = 2163606.1, y = 237946.6, label = "3%", color = "white", size = 3)+
-  annotate(geom = "text", x = -1092152.6,y = 809288.2, label = "7%", color = "white", size = 3)+
+  annotate(geom = "text", x = 2163606.1, y = 0, label = "3.1%", color = "black", size = 3)+
+  annotate(geom = "text", x = -1192152.6,y = 809288.2, label = "6.7%", color = "white", size = 3)+
   annotate(geom = "text", x = -1867594.7,y =912726.5, label = "2.5%",color = "white", size = 3)+
   annotate(geom = "text", x = -675361.6, y = 487741.4,label = "0.5%",color = "white", size = 3)+
   annotate(geom = "text", x = -888417.3, y = 1651194.8,label = "0.3%",color ="white", size = 3)+
-  annotate(geom = "text", x = 2413606.1, y = 421394.6,label = "0.6%",color ="black", size = 3)+
-  annotate(geom = "text", x = 2695757.5, y = 232727.5,label = "22%", color = "black", size = 3)+
-  annotate(geom = "text", x = 1565757, y = -750409 , label = "US 14% & Others 8%", 
+  annotate(geom = "text", x = 2413606.1, y = 431394.6,label = "0.6%",color ="black", size = 3)+
+  annotate(geom = "text", x = 2695757.5, y = 152727.5,label = "22%", color = "black", size = 3)+
+  annotate(geom = "text", x = 1565757, y = -750409 , label = "US 14% & Others 8.2%", 
            fontface = "italic", color = "black", size = 3) +
   coord_fixed() +
   theme_mapcan() +
@@ -585,20 +447,21 @@ m1 <- pr_geographic %>%
 
 pr_geographic2 <- mapcan(boundaries = province, type = standard)
 pr_geographic2 <- inner_join(pr_geographic2, A2, by = c("pr_alpha" = "province")) 
+
 m2 <- pr_geographic2 %>%
   ggplot(aes(x = long, y = lat, group = group, fill = Percentage)) +
   geom_polygon(show.legend = NA) +
   annotate(geom = "text",x = 642412.6,y = 201110.2, label = "21%", color = "white",size = 3)+
   annotate(geom = "text",x = 1349519.2,y = 782762.2, label = "4.7%",color = "white",size = 3)+
-  annotate(geom = "text",x = -115306.8,y = 644233.4, label = "1%", color = "white",size = 3)+
-  annotate(geom = "text",x = 2163606.1,y = 237946.6, label = "3%", color = "white", size = 3)+
-  annotate(geom = "text",x = -1092152.6,y = 809288.2, label = "16%", color = "white",size = 3)+
+  annotate(geom = "text",x = -115306.8,y = 644233.4, label = "1.0%", color = "white",size = 3)+
+  annotate(geom = "text",x = 2163606.1, y = 0, label = "3.1%", color = "black", size = 3)+
+  annotate(geom = "text",x=-1192152.6,y = 809288.2, label = "16%", color = "white",size = 3)+
   annotate(geom = "text",x = -1867594.7,y =912726.5, label = "5.2%", color = "white",size = 3)+
-  annotate(geom = "text",x = -675361.6,y = 487741.4, label = "0.7%", color = "white",size = 3)+
+  annotate(geom = "text",x = -675361.6,y = 487741.4, label = "0.8%", color = "white",size = 3)+
   annotate(geom = "text",x = -888417.3,y = 1651194.8 , label = "3.6%", color ="white",size = 3)+
   annotate(geom = "text", x = 2413606.1, y = 421394.6,label = "0.7%",color ="black", size = 3)+
-  annotate(geom = "text",x = 2695757.5,y = 232727.5, label = "19%", color = "black", size = 3)+
-  annotate(geom = "text", x = 1565757, y = -750409 , label = "US 9% & Others 15%", 
+  annotate(geom = "text",x = 2695757.5, y = 152727.5, label = "19%", color = "black", size = 3)+
+  annotate(geom = "text", x = 1565757, y = -750409 , label = "US 9.2% & Others 15%", 
            fontface = "italic", color = "black", size = 3) +
   coord_fixed() +
   scale_fill_continuous( type = "viridis",
@@ -610,12 +473,12 @@ m2 <- pr_geographic2 %>%
                          plot.title=element_text(size=rel(1.3), face="bold"))+
   ggtitle("During the pandemic")
 
-
-m1 + m2  
+(p7)/(m1+m2)+plot_layout(heights = unit(c(5, 6), c('cm', 'null'))) + plot_annotation(tag_levels = 'A')
+ggsave("Figure/Figure2.png", width = 9, , height = 8, dpi= 500) 
 ```
 ### Canada Map (pre and during the pandemic), show average daily over 9 month
 ```{r}
-Av.daily <- function(ProFinal){
+Av.daily1 <- function(ProFinal){
   CC <- ProFinal
   # get the average months March 2019 to Feb 2020 (except June July August 2019) 
   CC <- subset(CC, !date %in% c(as.Date("2019-01-01"), as.Date("2019-02-01"),
@@ -624,10 +487,8 @@ Av.daily <- function(ProFinal){
                                 as.Date("2019-08-01")) )
   rownames(CC) <- NULL  # Reset row names              
   CC1 <- CC[1:9,]    #prepandemic
-  CC2 <- CC[10:18,]  #pandemic
   # get the mean for both dataframe
   C1 <- colSums(CC1[2:13])
-  C2 <- colSums(CC2[2:13])
 
   C1 <- data.frame(C1)
   C1 <- cbind(province = rownames(C1), C1)
@@ -644,6 +505,19 @@ Av.daily <- function(ProFinal){
   C1$Daily <- ceiling(C1$Daily)
 
 
+  return(C1)
+}
+Av.daily2 <- function(ProFinal){
+  CC <- ProFinal
+  # get the average months March 2019 to Feb 2020 (except June July August 2019) 
+  CC <- subset(CC, !date %in% c(as.Date("2019-01-01"), as.Date("2019-02-01"),
+                                as.Date("2020-03-01"), as.Date("2019-06-01"), 
+                                as.Date("2019-07-01"), as.Date("2019-07-01"), 
+                                as.Date("2019-08-01")) )
+  rownames(CC) <- NULL  # Reset row names              
+  CC2 <- CC[10:18,]  #pandemic
+  # get the mean for both dataframe
+  C2 <- colSums(CC2[2:13])
   C2 <- data.frame(C2)
   C2 <- cbind(province = rownames(C2), C2)
   rownames(C2) <- 1:nrow(C2)
@@ -657,13 +531,10 @@ Av.daily <- function(ProFinal){
   ## 274 days during the pandemic 2020
   C2$Daily <- (C2$Daily)/274
   C2$Daily <- ceiling(C2$Daily)
-  
-  #return(C1)
   return(C2)
 }
-
-C1 <- Av.daily(ProFinal)
-C2 <- Av.daily(ProFinal)
+C1 <- Av.daily1(ProFinal)
+C2 <- Av.daily2(ProFinal)
 
 pr_geographic <- mapcan(boundaries = province, type = standard)
 pr_geographic <- inner_join(pr_geographic, C1, by = c("pr_alpha" = "province")) 
@@ -677,6 +548,7 @@ m3 <- pr_geographic %>%
   geom_polygon(show.legend = NA) +
   geom_text(data =df.label, aes(x = new.long, y = new.lat, group = 1, label = Daily), 
             size = 4, color = "white")+ 
+  annotate(geom = "text",x = 642412.6,y = 201110.2,label = "816", color = "black", size = 4)+
   annotate(geom = "text",x = 2685757.5,y = 232727.5,label = "648", color = "black", size = 4)+
   annotate(geom = "text", x = 2413606.1, y = 421394.6,label = "19",color ="black", size = 4)+
   annotate(geom = "text", x = 1565757, y = -750409 , label = "US 479 & Others 300", 
@@ -721,27 +593,12 @@ m4 <- pr_geographic2 %>%
                          plot.title=element_text(size=rel(1.3), face="bold"))+
   ggtitle("During the pandemic")
 
-m3 + m4 
-```
-
-
-##plots
-```{r}
 (p6+p5)/(m3+m4 ) + plot_layout(heights = unit(c(6.5, 1 ), c('cm', 'null'))) + plot_annotation(tag_levels = 'A')
 ggsave("Figure/Figure1.png", width = 14, , height = 12, dpi= 500)
 
 
-(p7)/(m1+m2 ) + plot_layout(heights = unit(c(5.8, 1 ), c('cm', 'null'))) + plot_annotation(tag_levels = 'A')
-ggsave("Figure/Figure2.png", width = 9, , height = 10, dpi= 500)
-
-(p1 + p2 ) + plot_annotation(tag_levels = 'A')  
-ggsave("Figure/FigureApp2.png", width = 10, , height = 6, dpi =500)
-
-
-# (p3 + p4) + plot_annotation(tag_levels = 'A')
-# ggsave("Figure/diffsource.png", width = 10, , height = 6, dpi =1200)
-
 ```
+
 
 ## get Daily total volume (during the pandemic) for empi model (rest of manuscript)
 ```{r}
@@ -810,7 +667,7 @@ for (i in 1:length(origin)){
 # round data 
 Tra_daily2 <- data.frame(lapply(Tra_daily2, function(x) if(is.numeric(x)) floor(x) else x))
 
-#write.csv(Tra_daily2, " TotalTraVolume.csv")
+write.csv(Tra_daily2, " TotalTraVolume.csv")
 ```
 
 
