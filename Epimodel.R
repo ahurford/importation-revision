@@ -2,13 +2,22 @@
 ## Project: Importation Risk
 ## Zahra Mohammadi
 
-# Revised by Amy Hurford on October 18, 2024. General linear models were changed to
-# generalized linear models (poisson). The original GLM code is commented out. The 
+# Revised by Amy Hurford on October 18, 2024. In the code, general linear models (GLM)
+# were changed to generalized linear models (poisson).
+# The original GLM code by Zahra is commented out. The 
 # mechanistic model is changed to be evaluated relative to a Poisson distribution.
 # Rather than reporting R^2, the code was changed to report the likelihood test ratio
-# statistic, since R^2 cannot be interpretted as the proportion of the variance
+# statistic, since R^2 cannot be interpreted as the proportion of the variance
 # explained for generalized linear models. A section was also added to consider travel
 # volume with just the IATA data.
+
+# Revised again by Amy Hurford on June 19, 2025 to consider international countries
+# of origin. To do this a new file TDF-clean.R was added to clean the TDF data so
+# that all countries that comprise 2.5% or more for at least one 3 month period
+# are considered. The corrections for excluded travelers from international origins are
+# just those from the TDF data, and this is just a *fixed number* of individuals
+# exempt from completing the TDF. Therefore, in this code, we will distribute the
+# exempted international travelers across the countries of origin.
 
 
 ##---------- 1. Load libraries ------------
@@ -16,19 +25,37 @@ source("preliminaries.R")
 
 ##---------- 2. Read data ------------
 # COVID cases in origins (CA excluded NL and US would consider as International)
-source("getcases.pro.R") # output: Case, Cum and pop
+source("getcases.pro.R") # output: Case and pop
 
 #Seroprevalence Data and Correction factor calculated in 
 source("getsero-CF.R") # output: CF
 
 # daily travel volume calculated in Volume-focusOrigin.R
+# This is the total travel volume including corrections for exclusions
 Volume <- read.csv("Data/TraVolData/TotalTraVolume.csv")
 Volume$date <- as.Date(as.character(Volume$date), format = "%Y-%m-%d")
-Volume <- Volume %>% rename(US = INT)
+
+# This does not have the exemptions
+Volume.Int <- read.csv("Data/TraVolData/TravelVolumeNLCHIfiltered.csv")%>%
+  select(AllFR, Bangladesh, France, Guyana, India, Norway, Philippines, Spain, Suriname, Thailand, UK, USA)%>%
+  mutate(Other.Int = AllFR-Bangladesh-France-Guyana-India-Norway-Philippines-Spain-Suriname-Thailand-UK-USA)%>%
+  rename(US=USA)
+
+Volume.Int.prop = Volume.Int/Volume.Int$AllFR
+Volume.Int.prop$AllFR[is.na(Volume.Int.prop$AllFR)] = 1
+Volume.Int.prop[is.na(Volume.Int.prop)] = 0
+Volume.Int.with.exemptions = Volume.Int.prop*Volume$INT
+
+Volume.Int.with.exemptions%>%select(Bangladesh, France, Guyana, India, Norway, Philippines, Spain, Suriname, Thailand, UK, US, Other.Int)
+
+# This is the travel volume for all the provinces, territories and countries
+# with correction for exempted travelers.
+Volume = data.frame(Volume, Volume.Int.with.exemptions)%>%
+  select(-AllFR, -INT)
 
 #break down daily volume to regular travel vs rotational workers (200 daily-rw)
 rw_Volume <- Volume %>% mutate(AB = 114, ON= 30, BC= 8 , SK = 4, MB = 2, QC = 4, 
-                               NB = 8, NS = 16, PEI = 4, TR = 10 , US = 0 )
+                               NB = 8, NS = 16, PEI = 4, TR = 10 , Bangladesh=0, France = 0, Guyana = 0, India = 0, Norway = 0, Philippines=0, Spain = 0, Suriname=0, Thailand=0, UK=0, US=0, Other.Int=0)
 #min(Volume$..) AB, Sk, PEI , NB and TR are less than this values needs to fix 
 fixor <- c("AB","PEI", "SK", "TR", "NB")
 for (i in 1:length(fixor)){
@@ -39,7 +66,7 @@ for (i in 1:length(fixor)){
 }
 
 # Regular travelers
-origins <- c("AB", "BC", "MB" ,"NB" ,"NS" , "ON","PEI", "QC","SK", "TR", "US"  )
+origins <- c("AB", "BC", "MB" ,"NB" ,"NS" , "ON","PEI", "QC","SK", "TR", "Bangladesh", "France", "Guyana", "India", "Norway", "Philippines", "Spain", "Suriname", "Thailand", "UK", "US", "Other.Int")
 rt_Volume <- Volume
 for (i in 1:length(origins)){
   pr <- origins[i]
@@ -55,22 +82,31 @@ Travel_case$date <- as.Date(Travel_case$date, format = "%Y-%m-%d")
 
 # Effect correction factor(CF) from sero data on case data 
 # to get the correct case data (for plotting)
+
 CFCase <- function(df1, df2, origins){
-  # inputs: df1 = correction , df2 = Case
+  # inputs: df1 = CF , df2 = Case
   origins <- origins
+  # Cases.
   df <- df2
   for (i in 1:length(origins)){
     OR <- origins[i]
     for (j in 1:nrow(df)){
-      df[j, OR] <- (df1[1, OR])*(df2[j, OR]) + df2[j, OR]
+      #df[j, OR] <- (df1[1, OR])*(df2[j, OR]) + df2[j, OR]
+      # different correction factors based on the year
+      if(format(as.Date(df2$date[j], format="%Y-%m-%d"),"%Y")=="2020"){
       }
+      df[j, OR] <- df2[j, OR]*df1[1, OR]
+    }
+    if(format(as.Date(df2$date[j], format="%Y-%m-%d"),"%Y")=="2021"){
+    df[j, OR] <- df2[j, OR]*df1[2, OR]
+  }
     }
     return(as.data.frame(df))
 }
-
-origins <- c("AB", "BC","NB", "MB","NS","ON", "PEI","QC", "SK", "TR", "US")
 Case2 <- CFCase(CF, Case, origins)
-
+Case <- Case2 %>%
+  mutate(Canada.not.NL = AB+BC+MB+NB+NS+ON+PEI+QC+SK+TR)%>%
+  mutate(Int = UK + Thailand + Suriname + Spain + Philippines + Norway + India + Guyana + France + Bangladesh+US+Other.Int)
 #Daily incidence proportion in departure (per date)
 Dailyinc <- function(df1, pop, origins){
   # df1 = case2 , df2 = population
@@ -86,14 +122,17 @@ Dailyinc <- function(df1, pop, origins){
   }
   return(df)
 }
-origins <- c("AB", "BC","NB", "MB","NS","ON", "PEI","QC", "SK", "TR", "US")
+
+origins <- c("AB", "BC", "MB" ,"NB" ,"NS" , "ON","PEI", "QC","SK", "TR", "Bangladesh", "France", "Guyana", "India", "Norway", "Philippines", "Spain", "Suriname", "Thailand", "UK", "US", "Other.Int", "Canada.not.NL", "Int")
 Dailyinfpre <- Dailyinc(Case2,pop, origins )
+Dailyinfpre.unc <- Dailyinc(Case,pop, origins) # uncorrected for seroprevalence
 Dailyinfpre  <- Dailyinfpre  %>% filter(Dailyinfpre$date < as.Date("2021-06-01"))
+Dailyinfpre.unc  <- Dailyinfpre.unc  %>% filter(Dailyinfpre.unc$date < as.Date("2021-06-01"))
 
 ## the rate of infected travelers including pre-test or not (changed value by 
 ## pre test date January 7, 2021 for international and May 15, 2021 for all)
 T.INT <- function(t, a, df1, df2, pr){
-  # df1 = Dailyinfpre , df2 = travel volume , pr = "US"
+  # df1 = Dailyinfpre , df2 = travel volume
   rho <- 0.69 
   psi <- 0.75
   #PCR Test sensitivity - age infection 0-25
@@ -111,7 +150,6 @@ T.INT <- function(t, a, df1, df2, pr){
       }
   return(x)
 }
-
 
 T.CA <- function(t, a, df1, df2, pr){
   # df1 = Dailyinfpre , df2 = travel volume (r or rw)
@@ -164,8 +202,23 @@ R.INT.s = function(Dailyinfpre, rt_Volume, pr){
   return(df1)
 }
 
-R.INT1 <- R.INT.s(Dailyinfpre, rt_Volume, "US") 
+# AH: edited to consider all the different countries of origin
+# rather than just the US (given reviewer-requested edits)
+R.INT1.US <- R.INT.s(Dailyinfpre, rt_Volume, "US") 
+R.INT1.BAN <- R.INT.s(Dailyinfpre, rt_Volume, "Bangladesh") 
+R.INT1.FRA <- R.INT.s(Dailyinfpre, rt_Volume, "France")
+R.INT1.GUY <- R.INT.s(Dailyinfpre, rt_Volume, "Guyana")
+R.INT1.IND <- R.INT.s(Dailyinfpre, rt_Volume, "India")
+R.INT1.NOR <- R.INT.s(Dailyinfpre, rt_Volume, "Norway")
+R.INT1.PHL <- R.INT.s(Dailyinfpre, rt_Volume, "Philippines")
+R.INT1.SPN <- R.INT.s(Dailyinfpre, rt_Volume, "Spain")
+R.INT1.SUR <- R.INT.s(Dailyinfpre, rt_Volume, "Suriname")
+R.INT1.THA <- R.INT.s(Dailyinfpre, rt_Volume, "Thailand")
+R.INT1.UK <- R.INT.s(Dailyinfpre, rt_Volume, "UK")
+R.INT1.Other.Int <- R.INT.s(Dailyinfpre, rt_Volume, "Other.Int")
 
+R.INT1<-R.INT1.US
+R.INT1$R <- R.INT1.US$R+R.INT1.BAN$R+R.INT1.FRA$R+R.INT1.GUY$R+R.INT1.IND$R+R.INT1.NOR$R+R.INT1.PHL$R+R.INT1.SPN$R+R.INT1.SUR$R+R.INT1.THA$R+R.INT1.UK$R+R.INT1.Other.Int$R
 
 R.INT.e = function(rt_Volume, pr){
   df1 <- data.frame(date =seq(from=as.Date("2020-09-01"), to = as.Date("2021-05-31"), by = "days"))
@@ -200,7 +253,23 @@ R.INT.e = function(rt_Volume, pr){
   return(df1)
 }
 
-R.INT2 <- R.INT.e(rt_Volume, "US")
+# As above revised to consider all international orgins.
+R.INT2.US <- R.INT.e(rt_Volume, "US") 
+R.INT2.BAN <- R.INT.e(rt_Volume, "Bangladesh") 
+R.INT2.FRA <- R.INT.e(rt_Volume, "France")
+R.INT2.GUY <- R.INT.e(rt_Volume, "Guyana")
+R.INT2.IND <- R.INT.e(rt_Volume, "India")
+R.INT2.NOR <- R.INT.e(rt_Volume, "Norway")
+R.INT2.PHL <- R.INT.e(rt_Volume, "Philippines")
+R.INT2.SPN <- R.INT.e(rt_Volume, "Spain")
+R.INT2.SUR <- R.INT.e(rt_Volume, "Suriname")
+R.INT2.THA <- R.INT.e(rt_Volume, "Thailand")
+R.INT2.UK <- R.INT.e(rt_Volume, "UK")
+R.INT2.Other.Int <- R.INT.e(rt_Volume, "Other.Int")
+
+R.INT2<-R.INT2.US
+R.INT2$E <- R.INT2.US$E+R.INT2.BAN$E+R.INT2.FRA$E+R.INT2.GUY$E+R.INT2.IND$E+R.INT2.NOR$E+R.INT2.PHL$E+R.INT2.SPN$E+R.INT2.SUR$E+R.INT2.THA$E+R.INT2.UK$E+R.INT2.Other.Int$E
+
 ####################### Canadian Province -- regular travelers
 R.CA.s = function(Dailyinfpre, rt_Volume, pr){
   df1 <- data.frame(date =seq(from=as.Date("2020-09-01"), to = as.Date("2021-05-31"), by = "days"))
@@ -256,7 +325,8 @@ R.CA.e = function(rt_Volume, pr){
   te <- 3
   df1["report"] <- df1$date + trep +  tr
   df1["E"] <- NA
-  PA1 <- 0.01
+  psi1 <- 0.01 # prob of being infected on flight
+  psi2 <- 0.05 # prop of travelers impacted by exposure notification
   PA2 <- 0
   expo = c(as.Date("2020-09-27"), as.Date("2020-10-05"), as.Date("2020-10-23"),
            as.Date("2020-11-04"), as.Date("2020-11-23"), as.Date("2020-11-24"),
@@ -269,11 +339,11 @@ R.CA.e = function(rt_Volume, pr){
   tsens <- c(0, 0.05, 0.1, 0.55, 0.78, 0.77, 0.73, 0.68, 0.64, 0.59, 0.55, 
              0.49, 0.43,0.37, 0.31, 0.25, 0.22, 0.19, 0.16, 0.13, 0.1, 0.09,
              0.08, 0.07, 0.06, 0.05)
-  #Probability develop symptom - age infection 0-13
+  
   for (i in 1:nrow(df1)){
     t <- df1$date[i]
     if ( t  %in% expo) {
-      df1$E[i] <- PA1*rt_Volume[rt_Volume$date == t, pr]*tsens[tr+te]
+      df1$E[i] <- psi1*psi2*rt_Volume[rt_Volume$date == t, pr]*tsens[tr+te]
     }
     else {
       df1$E[i] <- PA2*rt_Volume[rt_Volume$date == t, pr]*tsens[tr+te]
@@ -369,7 +439,7 @@ RW.Pro2 <- function(){
 
 Imp.CA.rw <- RW.Pro2() 
 
-#################aggregate
+#################aggregate: exemptions (E) and reported travelers (R)
 Imp.INT <- R.INT2 %>% left_join(R.INT1, by = "report")
 Imp.INT <- select(Imp.INT, -c(date.x, date.y))
 Imp.INT["RE.Int"] <- Imp.INT$E + Imp.INT$R
@@ -399,62 +469,114 @@ Imp.CA.r["RE.Ca"] <- rowSums(Imp.CA.r[, c("ON", "PEI", "QC", "SK", "AB", "BC", "
 Imp.CA <- Imp.CA.r %>% left_join(Imp.CA.rw, by = "report")
 Imp.CA["REW.Ca"] <- rowSums(Imp.CA[, c("RE.Ca","RW")])
 
-## one datafram for plotting
+## one dataframe for plotting
 IMP <- Imp.CA %>% left_join(select(Imp.INT , c(report, RE.Int)) , by = "report")
 IMP["Total"] <- rowSums(IMP[, c("REW.Ca","RE.Int")])
 ## Remove September5, since I just have rw not r 
 IMP <- IMP %>% filter(IMP$report >= as.Date("2020-09-06") & IMP$report < as.Date("2021-06-01"))
 
-##--------------- 5. competitive models (daily) -----------------------------------------
+
 ############# Models for international
+Volume = Volume%>%
+  mutate(Int = Bangladesh+France+Guyana+India+Norway+Philippines+Spain+Suriname+Thailand+UK+US+Other.Int)%>%
+  mutate(Canada.not.NL=ON+PEI+QC+SK+AB+BC+MB+NB+NS+TR)
+# Extracts reported international cases
 df.model6 <- select( Travel_case, c(date, Tot.Int)) %>% left_join(Volume , by ="date")
-df.model6 <- select(df.model6, c(date, Tot.Int, US)) %>% rename( vol = US, Rep.Int = Tot.Int )
+# AH: Revised to extract all countries not just US
+df.model6 <- select(df.model6, c(date, Tot.Int, Bangladesh, France, Guyana, India, Norway, Philippines, Spain, Suriname, Thailand, UK, US, Other.Int, Int))%>%
+  rename(Rep.Int = Tot.Int, v.Bangladesh = Bangladesh, v.France =France, v.Guyana = Guyana, v.India =India, v.Norway = Norway, v.Philippines = Philippines, v.Spain = Spain, v.Suriname = Suriname, v.Thailand = Thailand, v.UK = UK, v.US = US, v.Other.Int = Other.Int, v.Int = Int)
 df.model6 <- df.model6 %>% left_join(Dailyinfpre, by ="date")
-df.model6 <- select(df.model6, c(date, Rep.Int, vol, US) ) %>% rename( infpre = US)
-df.model6["volinf"] <- df.model6$vol*df.model6$infpre
+df.model6 <- select(df.model6, c(date, Rep.Int, v.Bangladesh, v.France, v.Guyana, v.India, v.Norway, v.Philippines, v.Spain, v.Suriname, v.Thailand, v.UK, v.US, v.Other.Int, v.Int,Bangladesh, France, Guyana, India, Norway, Philippines, Spain, Suriname, Thailand, UK, US, Other.Int,Int))
 
-TVInt <- glm(Rep.Int ~ 0 + vol, data = df.model6,family = poisson(link = "log"))
-summary(TVInt)
+df.model6["volinf.Bangladesh"] <- df.model6$v.Bangladesh*df.model6$Bangladesh
+df.model6["volinf.France"] <- df.model6$v.France*df.model6$France
+df.model6["volinf.Guyana"] <- df.model6$v.Guyana*df.model6$Guyana
+df.model6["volinf.India"] <- df.model6$v.India*df.model6$India
+df.model6["volinf.Norway"] <- df.model6$v.Norway*df.model6$Norway
+df.model6["volinf.Philippines"] <- df.model6$v.Philippines*df.model6$Philippines
+df.model6["volinf.Spain"] <- df.model6$v.Spain*df.model6$Spain
+df.model6["volinf.Suriname"] <- df.model6$v.Suriname*df.model6$Suriname
+df.model6["volinf.Thailand"] <- df.model6$v.Thailand*df.model6$Thailand
+df.model6["volinf.UK"] <- df.model6$v.UK*df.model6$UK
+df.model6["volinf.US"] <- df.model6$v.US*df.model6$US
+df.model6["volinf.Other.Int"] <- df.model6$v.Other.Int*df.model6$Other.Int
+df.model6["volinf.Int"] <- df.model6$v.Int*df.model6$Int
 
-InfInt <- glm(Rep.Int ~ 0 + infpre, data = df.model6, family = poisson(link = "log"))
-summary(InfInt)
+# Include a lag of 5 days which is consistent with the mechanistic model and
+# bar{a} an average of 1 day after arrival for symtomes to develop
+# t_r an average of 3 days between requesting the test and it being performed
+# t_rep an average of 1 day between testing and reporting.
+len = length(df.model6$date)
+df.model6.lag = data.frame(df.model6[6:len,1:2],df.model6[1:(len-5),3:length(colnames(df.model6))])
 
+require(MASS)
+# Model based on travel volume only
+# AH: removed 0 intercept based on reviewer 2 comment, also considered neg binomial and lagged exp. variables (July 28, 2025)
+Int.TV <- glm(Rep.Int ~  v.Bangladesh + v.France + v.Guyana + v.India + v.Norway + v.Philippines + v.Spain + v.Suriname + v.Thailand + v.UK + v.US + v.Other.Int, data = df.model6.lag,family = poisson(link = "log"))
+Int.TV.nb <- glm.nb(Rep.Int ~  v.Bangladesh + v.France + v.Guyana + v.India + v.Norway + v.Philippines + v.Spain + v.Suriname + v.Thailand + v.UK + v.US + v.Other.Int, data = df.model6.lag)
+# Model based on the product of infection prevalence only (does not have other int because assumed to be the same as US)
+Int.Inf <- glm(Rep.Int ~  Bangladesh + France + Guyana + India + Norway + Philippines + Spain + Suriname + Thailand + UK + US, data = df.model6.lag, family = poisson(link = "log"))
+Int.Inf.nb <- glm.nb(Rep.Int ~ Bangladesh + France + Guyana + India + Norway + Philippines + Spain + Suriname + Thailand + UK + US, data = df.model6.lag)
 #both travel volume and infection
-TVInfInt <- glm(Rep.Int ~ 0 + volinf , data = df.model6, family = poisson(link="log"))
-summary(TVInfInt)
+Int.TVInf <- glm(Rep.Int ~ volinf.Bangladesh + volinf.France + volinf.Guyana + volinf.India + volinf.Norway + volinf.Philippines + volinf.Spain + volinf.Suriname + volinf.Thailand + volinf.UK + volinf.US + volinf.Other.Int , data = df.model6.lag, family = poisson(link="log"))
+Int.TVInf.nb <- glm.nb(Rep.Int ~ volinf.Bangladesh + volinf.France + volinf.Guyana + volinf.India + volinf.Norway + volinf.Philippines + volinf.Spain + volinf.Suriname + volinf.Thailand + volinf.UK + volinf.US + volinf.Other.Int , data = df.model6.lag)
 
+#aggregated international data
+Int.TV.agg <- glm(Rep.Int ~  v.Int, data = df.model6.lag,family = poisson(link = "log"))
+Int.TV.agg.nb <- glm.nb(Rep.Int ~  v.Int, data = df.model6.lag)
+Int.Inf.agg <- glm(Rep.Int ~ Int, data = df.model6.lag, family = poisson(link = "log"))
+Int.Inf.agg.nb <- glm.nb(Rep.Int ~ Int, data = df.model6.lag)
+Int.TVInf.agg <- glm(Rep.Int ~ volinf.Int, data = df.model6.lag, family = poisson(link="log"))
+Int.TVInf.agg.nb <- glm.nb(Rep.Int ~ volinf.Int, data = df.model6.lag)
+Int.const.nb <- glm.nb(Rep.Int ~ 1, data = df.model6.lag)
+Int.const<- glm(Rep.Int ~ 1, data = df.model6.lag, family = poisson(link="log"))
 
-mod <- list(TVInt, InfInt, TVInfInt)
-mod.name <-  c("TravelVolume-Int", "Infection.Prevalence-Int", "TravelVolume*Infection.Prevalence-Int")
-AIC.INT = aictab(cand.set = mod, modnames = mod.name , c.hat = 1) 
-LR.INT = -2*(-TVInt$null.deviance - c(logLik(TVInt),logLik(TVInfInt),logLik(InfInt)))
-AIC.INT = data.frame(AIC.INT, LR = LR.INT)
+## AIC Table for International models at the country level (Poisson)
+mod <- list(Int.TV, Int.Inf, Int.TVInf, Int.TV.agg, Int.Inf.agg, Int.TVInf.agg, Int.const)
+mod.name <-  c("TV", "Inf", "InfxTV", "TV-agg", "Inf-agg", "TVxInf-agg", "const")
+AIC.INT = aictab(cand.set = mod, modnames = mod.name ) 
+# Only 11 coefficients for infection prevalence because Other.Int is identical to US.
+AIC.INT = data.frame(AIC.INT)
+
+## AIC Table for International models at the country level (negative binomial)
+mod <- list(Int.TV.nb, Int.Inf.nb, Int.TVInf.nb, Int.TV.agg.nb, Int.Inf.agg.nb, Int.TVInf.agg.nb, Int.const.nb)
+mod.name <-  c("TV-nb", "Inf-nb", "InfxTV-nb", "TV-agg-nb", "Inf-agg-nb", "TVxInf-agg-nb", "const-nb")
+AIC.INT.nb = aictab(cand.set = mod, modnames = mod.name ) 
+# Only 11 coefficients for infection prevalence because Other.Int is identical to US.
+AIC.INT.nb = data.frame(AIC.INT.nb)
+detach("package:MASS")
 
 ######### Models for Domestic
-df.model7 <- select( Travel_case, c(date, Tot.Dom)) %>% left_join(Volume , by ="date") 
-df.model7 <- select(df.model7, -c(US)) %>% rename(Rep.Dom = Tot.Dom)
-df.model7["vol.CA"] <- rowSums(df.model7[, c("ON", "PEI", "QC", "SK", "AB", "BC", "MB", "NB", "NS", "TR")])
+df.model7 <- select(Travel_case, c(date, Tot.Dom)) %>% left_join(Volume , by ="date") 
+df.model7 <- select(df.model7, -c(US,Bangladesh, France, Guyana, India, Norway, Philippines, Spain, Suriname, Thailand, UK, Other.Int, Int)) %>% rename(Rep.Dom = Tot.Dom)
+# lag five days, i.e., similar to international.
+len = length(df.model7$date)
+df.model7.lag = data.frame(df.model7[6:len,1:2],df.model7[1:(len-5),3:length(colnames(df.model7))])
 
-TVPr <- glm(Rep.Dom ~ 0+ AB + BC + MB + NB + NS + ON + PEI + QC + SK + TR, data = df.model7, family=poisson(link = "log"))
-summary(TVPr)
+require(MASS)
+CA.TV <- glm(Rep.Dom ~ AB + BC + MB + NB + NS + ON + PEI + QC + SK + TR, data = df.model7.lag, family=poisson(link = "log"))
+CA.TV.nb <- glm.nb(Rep.Dom ~ AB + BC + MB + NB + NS + ON + PEI + QC + SK + TR, data = df.model7.lag)
+CA.TV.agg=glm(Rep.Dom ~ Canada.not.NL, data= df.model7.lag, family = poisson(link= "log"))
+CA.TV.agg.nb=glm.nb(Rep.Dom ~  Canada.not.NL, data= df.model7.lag)
+detach("package:MASS")
 
-TVCA=glm( Rep.Dom ~ 0 + vol.CA, data= df.model7, family = poisson(link= "log"))
-summary(TVCA)
+df.model8 <- select(Travel_case, c(date, Tot.Dom)) %>% left_join( Dailyinfpre, by ="date") 
+df.model8 <- select(df.model8, -c(US,Bangladesh, France, Guyana, India, Norway, Philippines, Spain, Suriname, Thailand, UK, Other.Int, Int)) %>% rename(Rep.Dom = Tot.Dom)
+# lag five days, i.e., similar to international.
+len = length(df.model8$date)
+df.model8.lag = data.frame(df.model8[6:len,1:2],df.model8[1:(len-5),3:length(colnames(df.model8))])
 
-df.model8 <- select( Travel_case, c(date, Tot.Dom)) %>% left_join( Dailyinfpre, by ="date") 
-df.model8 <- select(df.model8, -c(US)) %>% rename(Rep.Dom = Tot.Dom)
-df.model8["inf.CA"] <- rowSums(df.model8[, c("ON", "PEI", "QC", "SK", "AB", "BC", "MB", "NB", "NS", "TR")])
+# The below is incorrect. Fixed in the revision by AH on July 4, 2025.
+#df.model8["inf.CA"] <- rowSums(df.model8[, c("ON", "PEI", "QC", "SK", "AB", "BC", "MB", "NB", "NS", "TR")])
 #infection provinces
 #InfPr <- lm(Rep.Dom ~  0 + AB + BC + MB + NB + NS + ON + PEI + QC + SK + TR, data = df.model8)
 #summary(InfPr)
-InfPr <- glm(Rep.Dom ~  0 + AB + BC + MB + NB + NS + ON + PEI + QC + SK + TR, data = df.model8, family = poisson(link = "log"))
-summary(InfPr)
-
-#infection Canada
-#InfCA <- lm(Rep.Dom  ~ 0+ inf.CA , data = df.model8 )
-#summary(InfCA)
-InfCA <- glm(Rep.Dom  ~ 0+ inf.CA , data = df.model8, family = poisson(link = "log"))
-summary(InfCA)
+require(MASS)
+CA.Inf <- glm(Rep.Dom ~  AB + BC + MB + NB + NS + ON + PEI + QC + SK + TR, data = df.model8.lag, family = poisson(link = "log"))
+CA.Inf.nb <- glm.nb(Rep.Dom ~  AB + BC + MB + NB + NS + ON + PEI + QC + SK + TR, data = df.model8.lag)
+CA.Inf.agg <- glm(Rep.Dom  ~ Canada.not.NL , data = df.model8.lag, family = poisson(link = "log"))
+CA.Inf.agg.nb <- glm.nb(Rep.Dom  ~ Canada.not.NL , data = df.model8.lag)
+detach("package:MASS")
 
 ##both travel volume*infection
 multivolinf <- function(df1, df2, origins){
@@ -469,28 +591,34 @@ multivolinf <- function(df1, df2, origins){
   }
   return(as.data.frame(df))
 }
-origins <- c("AB", "BC","NB", "MB","NS","ON", "PEI","QC", "SK", "TR")
+origins <- c("AB", "BC","NB", "MB","NS","ON", "PEI","QC", "SK", "TR", "Canada.not.NL")
 df.model9 <- multivolinf(df.model7, df.model8, origins)
-df.model9["volinfCA"] <- (df.model7$vol.CA)*(df.model8$inf.CA)
-df.model9 <- select(df.model9, -c(vol.CA))
+len = length(df.model9$date)
+df.model9.lag = data.frame(df.model9[6:len,1:2],df.model9[1:(len-5),3:length(colnames(df.model9))])
 
-TVInfPr=glm(Rep.Dom  ~ 0 + AB + BC + MB + NB + NS + ON + PEI + QC + SK + TR ,  data = df.model9 ,family = poisson(link = "log"))
-summary(TVInfPr)
+require(MASS)
+CA.TVInf=glm(Rep.Dom  ~ AB + BC + MB + NB + NS + ON + PEI + QC + SK + TR ,  data = df.model9.lag,family = poisson(link = "log"))
+CA.TVInf.nb=glm.nb(Rep.Dom  ~ AB + BC + MB + NB + NS + ON + PEI + QC + SK + TR ,  data = df.model9.lag)
+#aggregated
+CA.TVInf.agg <- glm(Rep.Dom  ~ Canada.not.NL , data = df.model9.lag, family = poisson(link = "log"))
+CA.TVInf.agg.nb <- glm.nb(Rep.Dom  ~ Canada.not.NL , data = df.model9.lag)
+CA.const <- glm(Rep.Dom  ~ 1, data = df.model9.lag, family = poisson(link = "log"))
+CA.const.nb <- glm.nb(Rep.Dom  ~ 1, data = df.model9.lag)
+detach("package:MASS")
 
-
-#Canada
-TVInfCA <- glm(Rep.Dom  ~ 0 + volinfCA , data = df.model9 , family = poisson(link = "log"))
-summary(TVInfCA)
-
-models <- list(TVPr, TVCA, InfPr, InfCA, TVInfPr, TVInfCA )
-model.names <-  c("Travel.Volume-Provinces", "Travel.Volume-CA", "Infection.Prevalence-Provinces", 
-                  "Infection.Prevalence-CA", "TravelVolume*Infection.Prevalence-Provinces",
-                  "TravelVolume*Infection.Prevalence-CA")
-LR.CA = -2*(-TVPr$null.deviance - c(logLik(TVPr),logLik(TVCA),logLik(InfPr), logLik(InfCA), logLik(TVInfPr),logLik(InfCA)))
+models <- list(CA.TV, CA.TV.agg, CA.Inf, CA.Inf.agg, CA.TVInf, CA.TVInf.agg, CA.const)
+model.names <-  c("TV", "TV-agg", "Inf", 
+                  "Inf-agg", "TVxInf",
+                  "TVxInf-agg", "const")
 AIC.CA = aictab(cand.set = models, modnames = model.names, c.hat = 1)
-AIC.CA = data.frame(AIC.CA,LR=LR.CA[c(5,3,1,6,2,4)])
+AIC.CA = data.frame(AIC.CA)
 
-
+models <- list(CA.TV.nb, CA.TV.agg.nb, CA.Inf.nb, CA.Inf.agg.nb, CA.TVInf.nb, CA.TVInf.agg.nb, CA.const.nb)
+model.names <-  c("TV-nb", "TV-agg-nb", "Inf-nb", 
+                  "Inf-agg-nb", "TVxInf-nb",
+                  "TVxInf-agg-nb", "const-nb")
+AIC.CA.nb = aictab(cand.set = models, modnames = model.names, c.hat = 1)
+AIC.CA.nb = data.frame(AIC.CA.nb)
 
 ################ model for epidemiology model output
 df.modelfull <- select(IMP, c("report", "REW.Ca", "RE.Int")) %>% rename(date = report)
@@ -506,28 +634,39 @@ LL.INT=sum(dpois(df.modelfull$Rep.Int, df.modelfull$Est.Int, log = TRUE))
 mech.AICc.CA = -2*LL.CA
 mech.AICc.INT = -2*LL.INT
 
-mech.mod.CA = c(Modnames = "mechanistic", K=0, AICc = mech.AICc.CA, Delta_AICc = mech.AICc.CA- as.numeric(AIC.CA$AICc[1]), ModelLik="", AICcWt = "", LL = LL.CA, Cum.Wt = "",LR="")
-mech.mod.INT = c(Modnames = "mechanistic", K=0, AICc = mech.AICc.INT, Delta_AICc = mech.AICc.INT- as.numeric(AIC.INT$AICc[1]), ModelLik="", AICcWt = "", LL = LL.INT, Cum.Wt = "",LR="")
+mech.mod.CA = c(Modnames = "mechanistic", K=0, AICc = mech.AICc.CA, Delta_AICc = mech.AICc.CA- as.numeric(AIC.CA$AICc[1]), ModelLik="", AICcWt = "", LL = LL.CA, Cum.Wt = "")
+mech.mod.INT = c(Modnames = "mechanistic", K=0, AICc = mech.AICc.INT, Delta_AICc = mech.AICc.INT- as.numeric(AIC.INT$AICc[1]), ModelLik="", AICcWt = "", LL = LL.INT, Cum.Wt = "")
 
 AIC.CA=rbind(AIC.CA, mech.mod.CA)
 AIC.INT=rbind(AIC.INT, mech.mod.INT)
 
-######### Save the best model output for both international and domestic
-bestmodel.Int <- TVInt$fitted.values
-bestmodel.CA <- TVInfPr$fitted.values
-# make one dataframe including epi model, best model and reported for plotting 
-# these are 273 values start from Sep 1 whereas predicted Imp start from Sep 6, 
-# do adjust to make dataframe
-dfplt <- df.modelfull
-dfplt["bestInt"] <- bestmodel.Int[6:273]   
-dfplt["bestDom"] <- bestmodel.CA[6:273]  
+######### Results tables for the main models
+AIC.CA = AIC.CA%>%select(Modnames, K, LL, AICc)
+AIC.INT = AIC.INT%>%select(Modnames, K, LL, AICc)
+AIC.CA.nb = AIC.CA.nb%>%select(Modnames, K, LL, AICc)
+AIC.INT.nb = AIC.INT.nb%>%select(Modnames, K, LL, AICc)
 
-print(AIC.CA)
-print(AIC.INT)
+LL.CA.const = as.numeric(AIC.CA$LL[which(AIC.CA$Modnames=="const")])
+LL.CA.const.nb = as.numeric(AIC.CA.nb$LL[which(AIC.CA.nb$Modnames=="const-nb")])
+LL.INT.const = as.numeric(AIC.INT$LL[which(AIC.INT$Modnames=="const")])
+LL.INT.const.nb = as.numeric(AIC.INT.nb$LL[which(AIC.INT.nb$Modnames=="const-nb")])
+AIC.CA = AIC.CA%>%mutate(LR = -2*(LL.CA.const - as.numeric(LL)))
+AIC.INT = AIC.INT%>%mutate(LR = -2*(LL.INT.const - as.numeric(LL)))
+AIC.CA.nb = AIC.CA.nb%>%mutate(LR = -2*(LL.CA.const.nb - as.numeric(LL)))
+AIC.INT.nb = AIC.INT.nb%>%mutate(LR = -2*(LL.INT.const.nb - as.numeric(LL)))
+AIC.CA = AIC.CA[order(AIC.CA$LL),]
+AIC.INT = AIC.INT[order(AIC.INT$LL),]
+AIC.CA.nb = data.frame(AIC.CA.nb)
+AIC.CA.nb = AIC.CA.nb[order(AIC.CA.nb$LL,decreasing=TRUE),]
+AIC.INT.nb = AIC.INT.nb[order(AIC.INT.nb$LL,decreasing=TRUE),]
 
-##### ----------------------Models that represent data gaps
-#####---------- Travel volume
-##### IATA and TDF data are only by month.
+
+##### ----------------------Models that represent other data gaps.
+#####---------- Suppose only one type of travel data is available. Needs to
+#####---------- consider only aggregated data for Canada and International because
+#####---------- some data sources are only by month with limits the number of
+#####--------- parameters that can be fit.
+##### IATA and FC data are only by month.
 Rep  <- select(Travel_case, c(date, Tot.Int,Tot.Dom )) 
 Rep$year  <- strftime(Rep$date, "%Y")   
 Rep$month <- strftime(Rep$date, "%m")
@@ -538,15 +677,15 @@ Rep.month <- Rep %>%
   ) %>%
   as.data.frame()
 
-## Total travel volume data
+## Total travel volume data (edits on July 4 by AH because need to consider
+# all international travelers not just US).
 total.volume <- read.csv("Data/TraVolData/TotalTraVolume.csv")
 total.volume$date <- as.Date(as.character(Volume$date), format = "%Y-%m-%d")
-total.volume <- total.volume %>% rename(US = INT)
 total.volume$year  <- strftime(total.volume$date, "%Y")   
 total.volume$month <- strftime(total.volume$date, "%m")
 total.volume.month <- total.volume %>%
   group_by( year, month) %>%
-  dplyr::summarize( Int= sum(US),
+  dplyr::summarize( INT= sum(INT),
                     BC = sum(BC),
                     AB = sum(AB),
                     SK = sum(SK),
@@ -578,86 +717,136 @@ FC.Volume <- read.csv("Data/TraVolData/FC-NL-nocrews.csv")
 fc = filter(FC.Volume,REF_DATE>as.Date("2020-08-01") & REF_DATE<as.Date("2021-06-01"))
 
 # Canada seroprevalence corrected - monthly
-inf.CA.month = select(df.model8, date,inf.CA)
+inf.CA.month = select(df.model8, date,Canada.not.NL)
 inf.CA.month$date <- as.Date(as.character(inf.CA.month$date), format = "%Y-%m-%d")
 inf.CA.month$year  <- strftime(inf.CA.month$date, "%Y")   
 inf.CA.month$month <- strftime(inf.CA.month$date, "%m")
 inf.CA.month <- inf.CA.month %>%
   group_by( year, month) %>%
-  dplyr::summarize( inf.CA= sum(inf.CA)
+  dplyr::summarize( inf.CA= sum(Canada.not.NL)
   ) %>%
   as.data.frame()
 
 # International seroprevalence corrected - monthly
-inf.Int.month = select(df.model6, date,volinf,infpre)
+inf.Int.month = select(df.model6, date,volinf.Int,Int)
 inf.Int.month$date <- as.Date(as.character(inf.Int.month$date), format = "%Y-%m-%d")
 inf.Int.month$year  <- strftime(inf.Int.month$date, "%Y")   
 inf.Int.month$month <- strftime(inf.Int.month$date, "%m")
 inf.Int.month <- inf.Int.month %>%
   group_by( year, month) %>%
-  dplyr::summarize(inf.Int= sum(infpre)
+  dplyr::summarize(inf.Int= sum(Int)
   ) %>%
   as.data.frame()
 
 df.model10 = as.data.frame(inner_join(inf.CA.month,Rep.month,by="month"))
-df.model10 = data.frame(df.model10,tv.CA=total.volume.month$CAnotNL,tv.INT = total.volume.month$Int, fc = fc$total, iata.CA = IATA.Volume$ALLCANotNL, iata.INT = IATA.Volume$US +IATA.Volume$nonUS)
+df.model10 = data.frame(df.model10,tv.CA=total.volume.month$CAnotNL, tv.INT = total.volume.month$INT,fc = fc$total, iata.CA = IATA.Volume$ALLCANotNL, iata.INT = IATA.Volume$US +IATA.Volume$nonUS)
 df.model10 = mutate(df.model10, tvprod.CA = tv.CA*inf.CA, iataprod.CA =iata.CA*inf.CA)
 df.model10 = select(df.model10,month,inf.CA,RInt,RCA,tv.CA,iata.CA,tvprod.CA,iataprod.CA, tv.INT, iata.INT,fc)
 df.model10 = mutate(df.model10, inf.INT = inf.Int.month$inf.Int)
 df.model10 = mutate(df.model10, iataprod.INT = iata.INT*inf.INT, fcprod = fc*inf.INT, tvprod.INT= tv.INT*inf.INT)
+require(MASS)
+const.CA = glm.nb(RCA~1,data=df.model10)
+total.tv.CA = glm.nb(RCA~tv.CA,data=df.model10)
+iata.tv.CA = glm.nb(RCA~iata.CA,data=df.model10)
+total.prod.CA = glm.nb(RCA~tvprod.CA,data=df.model10)
+iata.prod.CA = glm.nb(RCA~iataprod.CA,data=df.model10)
+const.INT = glm.nb(RInt~1,data=df.model10)
+total.tv.INT = glm.nb(RInt~tv.INT,data=df.model10)
+iata.tv.INT = glm.nb(RInt~iata.INT,data=df.model10)
+fc.tv.INT = glm.nb(RInt~fc,data=df.model10)
+total.prod.INT = glm.nb(RInt~tvprod.INT,data=df.model10)
+iata.prod.INT = glm.nb(RInt~iataprod.INT,data=df.model10)
+fc.prod.INT = glm.nb(RInt~fcprod,data=df.model10)
+detach("package:MASS")
 
-total.tv.CA = glm(RCA~0+tv.CA,data=df.model10, family=poisson(link = "log"))
-iata.tv.CA = glm(RCA~0+iata.CA,data=df.model10, family=poisson(link = "log"))
-total.prod.CA = glm(RCA~0+tvprod.CA,data=df.model10, family=poisson(link = "log"))
-iata.prod.CA = glm(RCA~0+iataprod.CA,data=df.model10, family=poisson(link = "log"))
-total.tv.INT = glm(RInt~0+tv.INT,data=df.model10, family=poisson(link = "log"))
-iata.tv.INT = glm(RInt~0+iata.INT,data=df.model10, family=poisson(link = "log"))
-fc.tv.INT = glm(RInt~0+fc,data=df.model10, family=poisson(link = "log"))
-total.prod.INT = glm(RInt~0+tvprod.INT,data=df.model10, family=poisson(link = "log"))
-iata.prod.INT = glm(RInt~0+iataprod.INT,data=df.model10, family=poisson(link = "log"))
-fc.prod.INT = glm(RInt~0+fcprod,data=df.model10, family=poisson(link = "log"))
-
-models <- list(total.tv.CA, iata.tv.CA, total.prod.CA, iata.prod.CA)
-model.names <-  c("Total volume (CA)", "IATA (CA)", "Total volume-prod (CA)", "IATA-prod (CA)")
-LR.tv.CA = -2*(-total.tv.CA$null.deviance - c(logLik(total.tv.CA),logLik(total.prod.CA),logLik(iata.prod.CA), logLik(iata.tv.CA)))
+models <- list(total.tv.CA, iata.tv.CA, total.prod.CA, iata.prod.CA, const.CA)
+model.names <-  c("Total volume (CA)", "IATA (CA)", "Total volume-prod (CA)", "IATA-prod (CA)", "const (CA)")
 AIC.tv.CA = aictab(cand.set = models, modnames = model.names, c.hat = 1)
-AIC.tv.CA = data.frame(AIC.tv.CA,LR=LR.tv.CA)
+LL.const.CA = logLik(const.CA)[1]
+AIC.tv.CA = data.frame(AIC.tv.CA)
+AIC.tv.CA = AIC.tv.CA%>%mutate(LR = -2*(LL.const.CA - as.numeric(LL)))
 
-total.tv.INT = glm(RInt~0+tv.INT,data=df.model10, family=poisson(link = "log"))
-iata.tv.INT = glm(RInt~0+iata.INT,data=df.model10, family=poisson(link = "log"))
-fc.tv.INT = glm(RInt~0+fc,data=df.model10, family=poisson(link = "log"))
-total.prod.INT = glm(RInt~0+tvprod.INT,data=df.model10, family=poisson(link = "log"))
-iata.prod.INT = glm(RInt~0+iataprod.INT,data=df.model10, family=poisson(link = "log"))
-fc.prod.INT = glm(RInt~0+fcprod,data=df.model10, family=poisson(link = "log"))
-
-models <- list(total.tv.INT, iata.tv.INT, fc.tv.INT, total.prod.INT, iata.prod.INT, fc.prod.INT)
-model.names <-  c("Total volume (INT)", "IATA (INT)", "FC (INT)","Total volume-prod (INT)", "IATA-prod (INT)", "FC-prod")
-LR.tv.INT = -2*(-total.tv.INT$null.deviance - c(logLik(iata.tv.INT),logLik(total.tv.INT),logLik(fc.tv.INT), logLik(fc.prod.INT), logLik(total.prod.INT), logLik(iata.prod.INT) ))
+models <- list(total.tv.INT, iata.tv.INT, fc.tv.INT, total.prod.INT, iata.prod.INT, fc.prod.INT, const.INT)
+model.names <-  c("Total volume (INT)", "IATA (INT)", "FC (INT)","Total volume-prod (INT)", "IATA-prod (INT)", "FC-prod", "constant (INT)")
+LL.const.INT = logLik(const.INT)[1]
 AIC.tv.INT = aictab(cand.set = models, modnames = model.names, c.hat = 1)
-AIC.tv.INT = data.frame(AIC.tv.INT,LR=LR.tv.INT)
+AIC.tv.INT = data.frame(AIC.tv.INT)
+AIC.tv.INT = AIC.tv.INT%>%mutate(LR = -2*(LL.const.INT - as.numeric(LL)))
+
+AIC.tv.INT = AIC.tv.INT[order(AIC.tv.INT$LL,decreasing=TRUE),]%>%select(Modnames,LL,LR,K,AICc)
+AIC.tv.CA = AIC.tv.CA[order(AIC.tv.CA$LL,decreasing=TRUE),]%>%select(Modnames,LL,LR,K,AICc)
 
 ##--------------- Infection prevalence
 ## Infection proportion without any corrections for seroprevalence:
-origins <- c("AB", "BC","NB", "MB","NS","ON", "PEI","QC", "SK", "TR", "US")
-inf.unc <- Dailyinc(Case,pop, origins )%>% filter(date<as.Date("2021-06-01"))%>%as.data.frame()
-origins <- c("AB", "BC","NB", "MB","NS","ON", "PEI","QC", "SK", "TR")
-prod.unc <- multivolinf(df.model7, inf.unc, origins)
-inf.unc <- mutate(inf.unc, Rep.Dom = prod.unc$Rep.Dom)
+inf.unc <- Dailyinc(Case,pop, origins )%>% filter(date<as.Date("2021-06-01"))%>%as.data.frame()%>%
+  mutate(Rep.Dom = df.model7$Rep.Dom, Rep.Int = df.model6$Rep.Int)
 
-unc.inf = glm(Rep.Dom~0+AB+BC+SK+MB+ON+QC+NB+NS+PEI+TR, family=poisson(link = "log"), data=inf.unc)
-unc.prod = glm(Rep.Dom~0+AB+BC+SK+MB+ON+QC+NB+NS+PEI+TR,data=prod.unc, family=poisson(link = "log"))
+prod.unc <-inf.unc
+prod.unc["Bangladesh"] <- df.model6$v.Bangladesh*Dailyinfpre.unc$Bangladesh
+prod.unc["France"] <- df.model6$v.France*Dailyinfpre.unc$France
+prod.unc["Guyana"] <- df.model6$v.Guyana*Dailyinfpre.unc$Guyana
+prod.unc["India"] <- df.model6$v.India*Dailyinfpre.unc$India
+prod.unc["Norway"] <- df.model6$v.Norway*Dailyinfpre.unc$Norway
+prod.unc["Philippines"] <- df.model6$v.Philippines*Dailyinfpre.unc$Philippines
+prod.unc["Spain"] <- df.model6$v.Spain*Dailyinfpre.unc$Spain
+prod.unc["Suriname"] <- df.model6$v.Suriname*Dailyinfpre.unc$Suriname
+prod.unc["Thailand"] <- df.model6$v.Thailand*Dailyinfpre.unc$Thailand
+prod.unc["UK"] <- df.model6$v.UK*Dailyinfpre.unc$UK
+prod.unc["US"] <- df.model6$v.US*Dailyinfpre.unc$US
+prod.unc["Other.Int"] <- df.model6$v.Other.Int*Dailyinfpre.unc$Other.Int
+prod.unc["Int"] <- df.model6$v.Other.Int*Dailyinfpre.unc$Int
+prod.unc["AB"]<-df.model7$AB*Dailyinfpre.unc$AB
+prod.unc["BC"]<-df.model7$BC*Dailyinfpre.unc$BC
+prod.unc["MB"]<-df.model7$MB*Dailyinfpre.unc$MB
+prod.unc["SK"]<-df.model7$SK*Dailyinfpre.unc$SK
+prod.unc["ON"]<-df.model7$ON*Dailyinfpre.unc$ON
+prod.unc["QC"]<-df.model7$QC*Dailyinfpre.unc$QC
+prod.unc["NB"]<-df.model7$NB*Dailyinfpre.unc$NB
+prod.unc["NS"]<-df.model7$NS*Dailyinfpre.unc$NS
+prod.unc["PEI"]<-df.model7$PE*Dailyinfpre.unc$PE
+prod.unc["TR"]<-df.model7$TR*Dailyinfpre.unc$TR
+prod.unc["Canada.not.NL"]<-df.model7$Canada.not.NL*Dailyinfpre.unc$Canada.not.NL
 
-models <- list(InfPr, TVInfPr,unc.inf, unc.prod)
-model.names <-  c("Infection.Prevalence-Provinces", "TravelVolume*Infection.Prevalence-Provinces",
-                  "unc-Infection.Prevalence-Provinces", "unc-TravelVolume*Infection.Prevalence-Provinces")
-LR.inf.unc = -2*(-InfPr$null.deviance - c(logLik(TVInfPr),logLik(unc.prod),logLik(InfPr), logLik(unc.inf)))
+len = length(inf.unc$date)
+inf.unc.lag = data.frame(inf.unc[6:len,1:2],inf.unc[1:(len-5),3:length(colnames(inf.unc))])
+len = length(prod.unc$date)
+prod.unc.lag = data.frame(prod.unc[6:len,1:2],prod.unc[1:(len-5),3:length(colnames(prod.unc))])
+
+require(MASS)
+unc.inf = glm.nb(Rep.Dom~AB+BC+SK+MB+ON+QC+NB+NS+PEI+TR, data=inf.unc.lag)
+unc.prod = glm.nb(Rep.Dom~AB+BC+SK+MB+ON+QC+NB+NS+PEI+TR,data=prod.unc.lag)
+detach("package:MASS")
+
+models <- list(CA.Inf.nb, CA.TVInf.nb,unc.inf, unc.prod, CA.const.nb)
+model.names <-  c("Inf", "InfxTV", "Inf-unc", "InfxTV-unc", "const")
 AIC.inf.unc = aictab(cand.set = models, modnames = model.names, c.hat = 1)
-AIC.inf.unc = data.frame(AIC.inf.unc,LR=LR.inf.unc)
-TVInfPr
-unc.prod
+AIC.inf.unc = data.frame(AIC.inf.unc)
+LL.const = logLik(CA.const.nb)[1]
+AIC.inf.unc.CA = AIC.inf.unc%>%mutate(LR = -2*(LL.const - as.numeric(LL)))
 
-print(AIC.tv.CA)
+require(MASS)
+unc.inf = glm.nb(Rep.Int~US+Bangladesh+France+Guyana+India+Norway+Philippines+Spain+Suriname+Thailand+UK+Other.Int, data=inf.unc.lag)
+unc.prod = glm.nb(Rep.Int~US+Bangladesh+France+Guyana+India+Norway+Philippines+Spain+Suriname+Thailand+UK+Other.Int,data=prod.unc.lag)
+detach("package:MASS")
+
+models <- list(Int.Inf.nb, Int.TVInf.nb,unc.inf, unc.prod, Int.const.nb)
+model.names <-  c("Inf", "InfxTV", "Inf-unc", "InfxTV-unc", "const")
+AIC.inf.unc = aictab(cand.set = models, modnames = model.names, c.hat = 1)
+AIC.inf.unc = data.frame(AIC.inf.unc)
+LL.const = logLik(Int.const.nb)[1]
+AIC.inf.unc = AIC.inf.unc%>%mutate(LR = -2*(LL.const - as.numeric(LL)))
+AIC.inf.unc.INT = AIC.inf.unc%>%mutate(LR = -2*(LL.const - as.numeric(LL)))
+
+AIC.inf.unc.INT = AIC.inf.unc.INT[order(AIC.inf.unc.INT$LL,decreasing=TRUE),]%>%select(Modnames,LL,LR,K,AICc)
+AIC.inf.unc.CA = AIC.inf.unc.CA[order(AIC.inf.unc.CA$LL,decreasing=TRUE),]%>%select(Modnames,LL,LR,K,AICc)
+
+######## RESULTS
+print(AIC.CA) # models have > nLL than the negative binomial ones
+print(AIC.INT)
+print(AIC.CA.nb)
+print(AIC.INT.nb)
+print(AIC.tv.CA) # monthly reporting of FC and IATA makes these data not very good
 print(AIC.tv.INT)
-print(AIC.inf.unc)
-print(TVInfPr)
+print(AIC.inf.unc.CA) # small differences in LR when using corrected versus uncorrected data
+print(AIC.inf.unc.INT)
 
