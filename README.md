@@ -1,7 +1,7 @@
 # Importation models for travel-related SARS-CoV-2 cases reported in Newfoundland and Labrador during the COVID-19 pandemic.
 
 The R code and data for the mansucript `Importation models for travel-related SARS-CoV-2 cases reported in Newfoundland and Labrador during the COVID-19 pandemic`
-[medRxiv](https://www.medrxiv.org/content/10.1101/2023.06.08.23291136v1) and accepted at Royal Society Open Science in September 2022.
+[medRxiv](https://www.medrxiv.org/content/10.1101/2023.06.08.23291136v1). Royal Society Open Science.
 
 Figure 1. in the main text can be produced from Volume-FocusOrigin.Rmd. The only issue is the dependency on 'ExtractTDF.csv'* see below, however, this effects panel A. The other panels use the TotalTraVol.csv file which is produced from using the ExtractTDF.csv file and available in the Data/TraVolData folder.
 
